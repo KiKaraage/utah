@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-24",
+  "generated_at": "2026-09-25",
   "generator": "scripts/generate-site-data.py",
   "groups": [
     {
@@ -122,6 +122,7 @@
         "pipewire-utils",
         "pulseaudio-utils",
         "python3-pip",
+        "samba",
         "samba-client",
         "samba-common-tools",
         "systemd-container",
@@ -174,7 +175,7 @@
     }
   ],
   "totals": {
-    "installed": 117,
+    "installed": 118,
     "unavailable": 10
   },
   "unavailable": [

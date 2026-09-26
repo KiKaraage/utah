@@ -78,6 +78,7 @@ enable_unit bootc-unified-storage.service
 # daemon running, udev autoload fails on input devices and the GUI prompts for
 # root credentials on launch. Enable it next to the desktop units; see #99.
 enable_unit input-remapper.service
+enable_unit ModemManager.service
 
 # Bluefin's Brewfile and Bazaar preinstall hook need the Flathub remote before
 # first boot. Keep this as a .flatpakrepo descriptor so the remote is available

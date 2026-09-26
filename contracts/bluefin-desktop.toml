@@ -138,6 +138,7 @@ enabled = [
   "flatpak-preinstall.service",
   "gdm.service",
   "input-remapper.service",
+  "ModemManager.service",
   "ublue-system-setup.service",
   "uupd.timer",
 ]

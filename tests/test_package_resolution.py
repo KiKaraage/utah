@@ -632,6 +632,44 @@ class DesktopUnitEnablementTests(unittest.TestCase):
                 self.assertIn(unit, self.script_units("enable_unit"))
                 self.assertIn(unit, self.preset_directives("enable"))
 
+    def test_systemd_boot_update_enabled_and_gated_on_the_loader(self):
+        # projectbluefin/utah#363: on systemd-boot systems bootupd stands down
+        # by design ("managed with bootctl"), so the image must carry the boot
+        # manager binaries and run bootctl update itself. The gate keeps BIOS
+        # systems (no efivars) off an ESP that is not systemd-boot's; Fedora
+        # GRUB-EFI also sets LoaderInfo via grub2's bli module, where bootctl
+        # update is a harmless no-op. Secure Boot systems must be excluded
+        # outright, or the unsigned build would overwrite a signed sd-boot and
+        # the firmware would reject the next boot.
+        self.assertIn("systemd-boot-update.service", self.script_units("enable_unit"))
+        self.assertIn("systemd-boot-update.service", self.preset_directives("enable"))
+
+        dropin = ROOT / (
+            "system_files/shared/usr/lib/systemd/system/"
+            "systemd-boot-update.service.d/10-only-on-systemd-boot.conf"
+        )
+        self.assertTrue(dropin.is_file(), f"missing loader gate: {dropin}")
+        text = dropin.read_text()
+        self.assertIn("[Unit]", text)
+        self.assertIn(
+            "ConditionPathExists=/sys/firmware/efi/efivars/"
+            "LoaderInfo-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f",
+            text,
+        )
+        self.assertIn("ConditionSecurity=!uefi-secureboot", text)
+        self.assertIn("#363", text)
+
+        contract = tomllib.loads((ROOT / "contracts/bluefin-desktop.toml").read_text())
+        self.assertIn(
+            "systemd-boot-update.service",
+            contract.get("services", {}).get("enabled", []),
+        )
+        overlay = tomllib.loads((ROOT / "packages/utah.toml").read_text())
+        self.assertIn(
+            "systemd-boot-unsigned",
+            overlay.get("services", {}).get("packages", []),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

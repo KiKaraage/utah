@@ -10,9 +10,88 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPES = ROOT / "system_files/shared/usr/share/ublue-os/just/60-custom.just"
+BASELINE = ROOT / "baselines/utah/rpms.tsv"
 
 
-@unittest.skipUnless(shutil.which("just") and shutil.which("jq"), "requires just and jq")
+# casey/just 1.56 (2026-07-09) stopped deduplicating an AST across nested
+# imports of the same file. On earlier releases, Common's deeper `60-custom.just`
+# import shadows Utah's shallower one and every override silently reverts to
+# Common's recipe (#449). Pin the test to the same floor the override relies on.
+MINIMUM_JUST_VERSION = (1, 56, 0)
+
+
+def _just_version() -> tuple[int, ...] | None:
+    path = shutil.which("just")
+    if not path:
+        return None
+    result = subprocess.run([path, "--version"], text=True, capture_output=True)
+    if result.returncode != 0:
+        return None
+    parts = result.stdout.strip().split()
+    if len(parts) < 2 or parts[0] != "just":
+        return None
+    try:
+        components = tuple(int(piece) for piece in parts[1].split("."))
+    except ValueError:
+        return None
+    # Pad to three components so the floor comparison is consistent with the
+    # baseline check (which parses NEVR into three components); a two-digit
+    # `just X.Y` string would otherwise compare (1, 56) < (1, 56, 0) as True
+    # at the exact floor and spuriously skip the whole class.
+    return components + (0,) * (3 - len(components))
+
+
+_just = shutil.which("just")
+_jq = shutil.which("jq")
+_version = _just_version() if _just else None
+if _version is not None and _version < MINIMUM_JUST_VERSION:
+    _VERSION_SKIP_REASON = (
+        f"ujust override precedence requires just >= {'.'.join(str(p) for p in MINIMUM_JUST_VERSION)};"
+        f" host has {'.'.join(str(p) for p in _version)};"
+        " see projectbluefin/utah#449"
+    )
+elif not _just:
+    _VERSION_SKIP_REASON = "requires `just` on PATH"
+elif not _jq:
+    _VERSION_SKIP_REASON = "requires `jq` on PATH"
+elif _version is None:
+    _VERSION_SKIP_REASON = "could not parse `just --version`"
+else:
+    _VERSION_SKIP_REASON = ""
+
+_VERSION_SKIP = unittest.skipUnless(not _VERSION_SKIP_REASON, _VERSION_SKIP_REASON)
+
+
+def _baseline_just_evr() -> str | None:
+    for line in BASELINE.read_text().splitlines():
+        name, _, evr = line.partition("\t")
+        if name == "just":
+            return evr.strip()
+    return None
+
+
+class JustFloorBaselineTests(unittest.TestCase):
+    """The shipped image, not just the developer's host, must clear the floor."""
+
+    def test_baseline_just_is_at_or_above_the_floor(self):
+        evr = _baseline_just_evr()
+        self.assertIsNotNone(evr, f"no `just` row in {BASELINE}")
+        version = evr.split("-", 1)[0]
+        try:
+            parsed = tuple(int(piece) for piece in version.split("."))
+        except ValueError:
+            self.fail(f"cannot parse `just` version from baseline EVR {evr!r}")
+        parsed += (0,) * (len(MINIMUM_JUST_VERSION) - len(parsed))
+        floor = ".".join(str(piece) for piece in MINIMUM_JUST_VERSION)
+        self.assertGreaterEqual(
+            parsed,
+            MINIMUM_JUST_VERSION,
+            f"image ships just {evr}, below the {floor} floor the ujust overrides"
+            " rely on; see projectbluefin/utah#449",
+        )
+
+
+@_VERSION_SKIP
 class UjustOverridesTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

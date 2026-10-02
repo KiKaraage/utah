@@ -314,3 +314,27 @@ and shipping one without signing the modules would not fix Secure Boot.
 Signing and enrollment remain tracked by #395. Common's guarded
 `check-idle-power-draw` stays unchanged until the factory supplies `powerstat`.
 These fallbacks do not add packages or enable Fedora runtime repositories.
+
+For #446, `report` overrides Common's `bonedigger-report` recipe so bug
+reports route to `projectbluefin/utah` instead of falling through Common's
+`ublue-image-repo` grammar. The override sets
+`UBLUE_IMAGE_REPO_BIN=/usr/local/libexec/utah-image-repo`; that Utah-local
+shim short-circuits every `utah*` name to `projectbluefin/utah` and forwards
+every other name to Common's authoritative resolver (so non-Utah images
+inheriting from this image still resolve correctly). The shim itself is
+installed by `Containerfile` from `scripts/image-repo.sh` (alongside the
+other `utah-*` helpers, under the same `<name>.sh` -> `utah-<name>`
+rename) and listed in `just check`'s presence assertion. Its option
+loop mirrors Common's exactly — `--` and the first non-option both end
+option parsing — and the remaining positionals are forwarded verbatim,
+so an empty `IMAGE_NAME` keeps its slot instead of promoting
+`IMAGE_TAG` into it.
+
+Two deliberate differences from Common's `report` recipe: the override sets
+`BONEDIGGER_BRAND="🐦 Utah Bug Report"` so the prompt names Utah rather than
+Bluefin, and it does not forward Common's `BONEDIGGER_VERSION` because
+`bonedigger-report` never reads that variable and it is not in scope for a
+Utah-local recipe. The `--list` description is kept on a single comment line
+immediately above `[group('System')]`; `just` uses only that line, so the
+explanatory block above it must stay separated by a blank line or `ujust
+--list` would print an implementation-comment fragment instead.

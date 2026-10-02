@@ -68,10 +68,14 @@ than being noticed later.
 | --- | --- |
 | Bluefin contract installed | **61** |
 | Utah additions (GNOME 51, base-image parity, device firmware, desktop services) | 88 |
-| Genuinely unavailable | **6** |
+| Genuinely unavailable | **7** |
 
 The install writes its resolved list to `/usr/share/utah/contract.txt` and the
-verify step asserts *that file*, so the two cannot disagree. These counts are
+verify step asserts *that file*, so the two cannot disagree. The unavailable
+row is not limited to the copied contract: it also holds image-level parity
+gaps — names Bluefin's published image ships from a build file outside
+`base.toml`, recorded in `baselines/bluefin/rpms.tsv` and triaged in
+`baselines/triage.toml` (`nvtop` is the current example). These counts are
 generated from `packages/bluefin.toml` and `packages/utah.toml`
 (`scripts/generate-site-data.py`, `site/data/packages.json`); `just check`
 fails if this table drifts from that output (`scripts/check-doc-counts.py`).

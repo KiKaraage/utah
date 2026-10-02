@@ -53,8 +53,10 @@ policy for changing them.
     and iwlegacy packages are named explicitly — the X230's
     `iwlwifi-6000g2a-6.ucode` ships in `iwlwifi-dvm-firmware` (#97).
   - `[services]` — desktop services Bluefin adds on top of the server base.
-  - `[unavailable]` — Bluefin contract packages none of Utah's repositories
-    provide.
+  - `[unavailable]` — Bluefin parity gaps none of Utah's enabled repositories
+    provide, whether the name comes from the copied `base.toml` contract or
+    from the published Bluefin image snapshot
+    (`baselines/bluefin/rpms.tsv`).
 
 ## Wi-Fi documentation currency
 
@@ -68,7 +70,11 @@ hardware establishes that its radio works.
 
 ## [unavailable] rules
 
-`[unavailable]` means "no source provides this name at all". Each entry
+`[unavailable]` means "no repository Utah enables provides this name at all".
+It covers both kinds of parity gap: names in the copied `base.toml` contract,
+and names Bluefin's published image ships from a build file outside that
+contract (recorded in `baselines/bluefin/rpms.tsv` and triaged in
+`baselines/triage.toml` — `nvtop` is the current example). Each entry
 **MUST carry a tracking issue**: the list is the documented parity debt, not
 a dumping ground for packages that are merely inconvenient (header comment,
 `packages/utah.toml`).
@@ -197,7 +203,7 @@ Update it whenever synchronizing `packages/bluefin.toml` with upstream.
 
 Current counts, per the README "Package parity" section: 61 Bluefin contract
 packages installed, 88 Utah additions (GNOME 51, base-image parity, device
-firmware, desktop services), 6 genuinely unavailable. `scripts/check-doc-counts.py` (part of
+firmware, desktop services), 7 genuinely unavailable. `scripts/check-doc-counts.py` (part of
 `just check`) recomputes these from the manifests and fails if either
 document drifts from `site/data/packages.json`.
 

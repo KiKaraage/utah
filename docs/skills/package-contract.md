@@ -118,12 +118,13 @@ precede base Hummingbird packages (`priority=10`). Repositories without this mar
 the desktop package transaction.
 
 The pinned package image is an RPM repository, not a runtime dependency. It is
-bind-mounted into the RUN steps that install from it (`Containerfile`
-L177 and L255) and never copied into a layer: a COPY of the whole ~4 GB
-repository would leave a permanent layer behind, so reproducibility now comes
-from the digest-pinned `packages` stage being the only source the package
-transaction can see rather than from the repository contents living in the
-image.
+bind-mounted into the package-contract and flavor-specific install RUN steps in
+[`Containerfile`](../../Containerfile), both identified by
+`--mount=type=bind,from=packages,source=/repository,target=/etc/utah-packages,ro`,
+and never copied into a layer: a COPY of the whole ~4 GB repository would leave
+a permanent layer behind, so reproducibility now comes from the digest-pinned
+`packages` stage being the only source the package transaction can see rather
+than from the repository contents living in the image.
 
 ## Printing and scanning gaps
 

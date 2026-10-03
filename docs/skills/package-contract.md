@@ -1,7 +1,7 @@
 ---
 name: package-contract
-version: "1.0"
-last_updated: "2026-10-01"
+version: "1.1"
+last_updated: "2026-10-03"
 id: package-contract
 one_line_purpose: Maintain Bluefin package parity and Utah's overlay manifest.
 entry_point: docs/skills/package-contract.md
@@ -253,6 +253,20 @@ does not (`baselines/GAP.md`). It does not say *where* the missing name
 could come from, only that it is missing. That gap was the 2026-09-30
 bare-metal audit (#382): `rpm -qa` both images, `comm` the difference,
 then partition each gap name by which repository could supply it.
+
+The `EXTRACT` script inside that tool globs a closed list of user-visible
+paths (applications, autostarts, sessions, systemd units, `/usr/bin`,
+`/usr/sbin`) and the Bluefin firefox-config defaults
+(`/usr/share/ublue-os/firefox-config/*`, #502). The glob is `*`, not
+`*.js`, because `99-flatpaks.sh` copies the whole directory: a narrower
+pattern would let a non-`.js` file ship unseen. Adding a path means
+adding a glob AND a `KINDS` entry so `write_report()` can classify the
+new rows. `GapTests` in `tests/test_image_baseline.py` exercises missing
+Firefox defaults in the report and recognizes an unowned overlay as shipped.
+For extraction proof, run `extract IMAGE /tmp/surface-check` against a real
+image and inspect the Firefox rows and asset contents; source-string checks
+cannot establish shipping. Never append rows measured from a newer image to
+an older snapshot: `image.txt` must describe the same image as both TSVs.
 
 `scripts/audit-bluefin-parity.py` is the re-runnable version of that
 pipeline. Every name Bluefin ships that Utah does not install (and does

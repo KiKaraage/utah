@@ -13,7 +13,8 @@ dependencies: []
 tags: [packages, parity, bluefin, contracts]
 description: >-
   Bluefin parity contract: verbatim bluefin.toml, utah.toml overlay, device
-  firmware, [unavailable] rules, repository policy. Use when adding, removing,
+  firmware, [unavailable] rules, repository policy (on-image reposdir
+  scan). Use when adding, removing,
   or debugging packages or parity/check-repos failures.
 metadata:
   type: policy
@@ -125,6 +126,28 @@ and never copied into a layer: a COPY of the whole ~4 GB repository would leave
 a permanent layer behind, so reproducibility now comes from the digest-pinned
 `packages` stage being the only source the package transaction can see rather
 than from the repository contents living in the image.
+
+The allowlist also runs **on-image**, against the composed image's runtime RPM
+repositories, not just the source files in `packages/`. `verify-rpm-contract.py`
+scans every `reposdir` dnf5 resolves at runtime, not a hardcoded list of
+defaults (#454, #513, #536). Repository override directories
+(`/etc/dnf/repos.override.d`) are not covered here; they are tracked
+separately (#527).
+
+- The `reposdir=` option in `/usr/share/dnf5/libdnf.conf.d/*.conf`,
+  `/etc/dnf/libdnf5.conf.d/*.conf`, or `/etc/dnf/dnf.conf` replaces the
+  documented default list. The gate loads these `[main]` configs in dnf5's
+  order — drop-ins merged by file name (an `/etc` file masks a same-named
+  `/usr/share` file) and applied sorted by file name, then `dnf.conf` — and
+  uses the last-set value if any, so a custom reposdir the base image
+  configures is scanned instead of the three defaults (#536).
+- Without `reposdir=` configured, the gate falls back to dnf5's documented
+  defaults — `/etc/yum.repos.d`, `/etc/distro.repos.d`,
+  `/usr/share/dnf5/repos.d` — so a `.repo` file the base ships anywhere in
+  those paths is subject to the same allowlist (#454, #513). A repo file the
+  base ships in `/etc/distro.repos.d` or `/usr/share/dnf5/repos.d` is enabled
+  at runtime exactly as one in `/etc/yum.repos.d`, so scanning only the
+  first would leave it invisible to the gate (#513).
 
 ## Printing and scanning gaps
 

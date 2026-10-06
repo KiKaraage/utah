@@ -1,7 +1,7 @@
 ---
 name: desktop-contract
 version: "1.0"
-last_updated: "2026-09-30"
+last_updated: "2026-10-05"
 id: desktop-contract
 one_line_purpose: Maintain Utah identity, Bluefin desktop defaults, and first-boot Flatpak policy.
 entry_point: docs/skills/desktop-contract.md
@@ -177,15 +177,14 @@ second mechanism, not the pixmap overlay.
 GDM uses its own dconf profile (`/etc/dconf/profile/gdm`, provided by the
 gdm RPM). Utah ships a single keyfile,
 `system_files/shared/etc/dconf/db/gdm.d/01-bluefin-gdm-logo`, that sets
-`logo` to `/usr/share/pixmaps/bluefin-gdm-logo.png`, a 150x61 Bluefin
-wordmark Utah ships in `system_files/shared/usr/share/pixmaps/`. It is a
-copy of `common`'s `fedora-gdm-logo.png` under a Utah-owned name, so no logos
-RPM owns or erases it.
+`logo` to `/usr/share/pixmaps/bluefin-gdm-logo.png`, a 150x64 Bluefin
+wordmark Utah ships in `system_files/shared/usr/share/pixmaps/` under a
+Utah-owned name, so no logos RPM owns or erases it.
 
 **Do not point `logo` at `bluefin-logos/bluefin.png`.** gnome-shell draws the
 greeter logo at its natural size; that file is 372x493 and fills the login
-screen. Bluefin-LTS keeps the greeter logo small by using `common`'s 150x61
-`fedora-gdm-logo.png`. A unit test caps the shipped logo at 256x128.
+screen. Bluefin-LTS keeps the greeter logo small by using a 150x64
+wordmark. A unit test caps the shipped logo at 256x128.
 
 `scripts/configure-branding.sh` runs `dconf update` after stamping the
 contract files, so the greeter database is compiled at build time and a

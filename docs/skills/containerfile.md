@@ -60,6 +60,15 @@ In summary:
   rebuilt nothing and shipped the previous factory's packages (#371). The
   stamp rides a COPY before the transaction, and COPY content always keys the
   cache. A test fails the build when the two disagree.
+- Renovate's built-in Dockerfile extraction skips the composed package ARG.
+  The repository's regex manager instead discovers the digest directly in
+  `PACKAGE_IMAGE_SHA` and in the `.repo` stamp, with both occurrences grouped
+  as `ghcr.io/projectbluefin/utah-packages:latest`. This retains the local
+  `PACKAGE_IMAGE_REF` override and the digest-only OCI factory label.
+  Renovate 44.132.2 extraction and real replacement were exercised against
+  both files: they change to one digest while preserving unrelated content.
+  The duplicate scheduled updater is retired; the grouped PR must still
+  pass the package transaction and cache-stamp equality checks.
 - External executable release assets (such as `uupd`) are pinned by version
   and verified with explicit sha256 checksums (`UUPD_SHA256`) before
   extraction.
@@ -130,6 +139,18 @@ write it. The cache is off, silently, whenever the package is not readable
 from where the build runs, which is the case until a testing-branch build has
 pushed once.
 
+The transaction's cache key is its COPY'd inputs: the manifests, the repo
+files (the `# factory-pin:` stamp among them, #371) and the install script.
+Hummingbird's own repository is unpinned and rolling, so none of those move
+when it publishes, and the cache used to replay the same transaction until a
+base-image bump busted it. `build-ghcr` therefore resolves the repository's
+`repomd.xml` `<revision>` -- a publish timestamp -- and passes its UTC day as
+`ARG HUMMINGBIRD_REPO_DAY`, declared directly above the transaction. The day,
+not the raw revision: Hummingbird republishes several times a day, and keying
+on every publish would rebuild the most expensive layer on nearly every run.
+Unresolvable metadata warns and builds with `unresolved`; local builds keep
+the `unset` default.
+
 ## Adding a script
 
 All of Utah's scripts arrive in one COPY, staged under `/tmp/utah-scripts/`
@@ -173,6 +194,17 @@ last package install, which is the NVIDIA and OGC step, not after the main
 transaction. The lint that checks the result runs in the same layer
 (`bootc container lint --fatal-warnings --skip nonempty-boot`): nothing can
 change between the two (comment, `Containerfile`).
+
+The one deliberate exception is `/var/home`, created after clean-stage but
+before lint in that same RUN. `/home` is a symlink to `var/home` and
+useradd ships `HOME=/home` (#576), so any `useradd --create-home` fails on
+a dangling symlink -- the installer chroot on a fresh install (no tmpfiles
+has run there yet), the tacklebox customize container, and the live ISO
+build all broke with `cannot create directory /home`, exit 12 (#602).
+clean-stage strips all of `/var` except cache, so the mkdir cannot go
+earlier; placing it before lint keeps lint proving the directory is covered
+by the `utah-home.conf` tmpfiles entry. A tmpfiles `d` line alone is not
+enough -- it only runs at boot, never in the installer chroot.
 
 ## `just` override and the 1.56 floor
 

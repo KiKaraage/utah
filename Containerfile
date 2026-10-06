@@ -1,16 +1,16 @@
-ARG BASE_IMAGE=quay.io/hummingbird-community/bootc-os:latest@sha256:55d7a23a804878b4096aae0e8840445a6a8acf4dba33d1b9a8260e808407e04f
+ARG BASE_IMAGE=quay.io/hummingbird-community/bootc-os:latest@sha256:4ececc14324a9ce98be40ddc4197a7ffb855394cea38b0f47330be80a6937873
 # The package factory publishes a complete, digest-addressable RPM repository.
 # Keep this pin in Utah so an image build is reproducible and can be reviewed
 # against the exact package set it consumes.
 ARG PACKAGE_IMAGE=ghcr.io/projectbluefin/utah-packages
-ARG PACKAGE_IMAGE_SHA=sha256:0f04cff2dd0b085604ff3cd79d538ab14b97cbe356980f7d365a35dfc70c857b
+ARG PACKAGE_IMAGE_SHA=sha256:d257e97a0057e37da47995bb142c180e2352960ab13bd44594215616a395b717
 # CI keeps PACKAGE_IMAGE_SHA pinned. PACKAGE_IMAGE_REF supports a local image
 # in containers-storage, where no registry digest is available.
 ARG PACKAGE_IMAGE_REF=${PACKAGE_IMAGE}@${PACKAGE_IMAGE_SHA}
 ARG COMMON_IMAGE=ghcr.io/projectbluefin/common
-ARG COMMON_IMAGE_SHA=sha256:0c7ac94231cb6ff14b947dc2f4f4c421ec5643c257c25269176d8e23932984de
+ARG COMMON_IMAGE_SHA=sha256:073b45823dc40d9923e6d98e108f547848c47476ff00190f7762c35f390ff2e5
 ARG BREW_IMAGE=ghcr.io/ublue-os/brew
-ARG BREW_IMAGE_SHA=sha256:bc6f5a9fc4f28cded2fe567b31f74825c1f4481d5e43c537c3fcc0d3df6d22ab
+ARG BREW_IMAGE_SHA=sha256:2aaf87e3757466bc28d056505a651c7ca5c56fd28f6ff709b34f3f5dbc860e89
 
 FROM ${COMMON_IMAGE}@${COMMON_IMAGE_SHA} AS common
 FROM ${BREW_IMAGE}@${BREW_IMAGE_SHA} AS brew
@@ -174,7 +174,28 @@ RUN --mount=type=bind,from=v4l2loopback,source=/out,target=/tmp/utah-v4l2loopbac
 # The package lists live in the manifests, not here.  When they were spelled
 # out in this RUN as well, the two copies drifted and the contract check was
 # asserting a different set than the install had asked for.
+# Hummingbird's repository is not pinned: it is a rolling distribution and
+# Utah takes its packages as they publish. But nothing in this layer's cache
+# key moved when they did -- the manifests, the repo files and the factory
+# stamp all stay put -- so the registry layer cache served the same
+# transaction night after night, and new Hummingbird RPMs reached testing only
+# when a base-image bump happened to bust it. `just build-ghcr` passes the UTC
+# day of the repository's repomd <revision> (a publish timestamp), so the
+# transaction picks up new Hummingbird packages once a day and same-day builds
+# still share the cached layer. Local builds leave it unset.
+ARG HUMMINGBIRD_REPO_DAY=unset
 RUN --mount=type=bind,from=packages,source=/repository,target=/etc/utah-packages,ro \
+    echo "Hummingbird repository day: ${HUMMINGBIRD_REPO_DAY}" && \
+    # dracut's crypt generator exits 2 on crypttab-less boots: with no
+    # /etc/crypttab it takes a bare top-level 'return 0', which bash
+    # rejects outside a function (exit 2, logged as a failed generator).
+    # An empty crypttab parses to zero entries and exits 0; the installer
+    # overwrites it on LUKS installs. Seeded first in the transaction so
+    # any dracut run (kernel install here, initramfs regeneration later)
+    # picks it up into the initramfs (#590). NOTE: HUMMINGBIRD_REPO_DAY
+    # must stay directly above this RUN, so the rationale lives here, not
+    # above it (tests/test_hummingbird_repo_day.py).
+    : > /etc/crypttab && \
     /usr/local/libexec/utah-install-packages \
       /usr/share/utah/bluefin.toml /usr/share/utah/utah.toml && \
     IMAGE_FLAVOR=main /usr/local/libexec/utah-verify-rpm-contract \
@@ -282,8 +303,17 @@ RUN --mount=type=bind,from=packages,source=/repository,target=/etc/utah-packages
 # is the NVIDIA and OGC step, not after the main transaction. The lint that
 # checks the result runs in the same layer: nothing can change between the two.
 # The home-label check runs first: clean-stage removes the utah-* helpers.
+#
+# /var/home is created after clean-stage (which strips all of /var except
+# cache) but before lint, so lint still proves the directory is covered by a
+# tmpfiles.d entry (utah-home.conf). The directory must ship in the image:
+# /home is a symlink to var/home and useradd ships HOME=/home (#576), so any
+# `useradd --create-home` fails on a dangling symlink -- the installer chroot
+# on a fresh install, the tacklebox customize container, and the live ISO
+# build all broke with "cannot create directory /home", exit 12 (#602).
 RUN /usr/local/libexec/utah-fix-home-labels --check && \
     /usr/local/libexec/utah-clean-stage && \
+    mkdir -p /var/home && \
     bootc container lint --fatal-warnings --skip nonempty-boot
 
 LABEL org.opencontainers.image.title="Utah"

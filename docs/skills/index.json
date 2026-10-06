@@ -14,7 +14,7 @@
         "actions",
         "promotion"
       ],
-      "description": "build.yml contract gate, kernel-cache job, main/kernel matrix split, promote-testing-to-main and sync-main-to-testing, actions@v1 delegation, weekly factory-pin bump. Use when changing .github/workflows/ or debugging a red run.",
+      "description": "build.yml contract gate, kernel-cache job, main/kernel matrix split, promote-testing-to-main and sync-main-to-testing, actions@v1 delegation, Renovate-managed factory pin. Use when changing .github/workflows/ or debugging a red run.",
       "version": "1.0",
       "last_updated": "2026-09-29",
       "doc_type": "reference"
@@ -52,8 +52,28 @@
       ],
       "description": "The runtime desktop contract in contracts/bluefin-desktop.toml and its in-image verifiers. Use when changing branding, os-release, service presets, GNOME extensions, or first-boot Flatpak behavior.",
       "version": "1.0",
-      "last_updated": "2026-10-05",
+      "last_updated": "2026-10-06",
       "doc_type": "policy"
+    },
+    {
+      "id": "docs-parity",
+      "name": "docs-parity",
+      "one_line_purpose": "Reconcile Utah's README with the docs.projectbluefin.io/utah page before deleting duplicate prose.",
+      "entry_point": "docs/skills/docs-parity.md",
+      "category": "meta",
+      "status": "active",
+      "tags": [
+        "docs",
+        "readme",
+        "projectbluefin.io",
+        "renderer",
+        "parity",
+        "reconciliation"
+      ],
+      "description": "README is the upstream source for docs.projectbluefin.io/utah; the docs page is rendered at build time. Use when the README changes touch what the docs page shows, when the docs page gains a live component, or when reconciling the two for a release.",
+      "version": "1.0",
+      "last_updated": "2026-10-03",
+      "doc_type": "procedure"
     },
     {
       "id": "flavors",
@@ -106,7 +126,7 @@
       ],
       "description": "Local validation loop: build-ghcr, bootc install to-disk, QEMU/noVNC boot, live ISO boot paths, and Secure Boot strategy. Use when validating changes end-to-end or debugging boot, GDM, or live-session failures.",
       "version": "1.0",
-      "last_updated": "2026-09-23",
+      "last_updated": "2026-10-04",
       "doc_type": "runbook"
     },
     {
@@ -122,7 +142,7 @@
         "bluefin",
         "contracts"
       ],
-      "description": "Bluefin parity contract: verbatim bluefin.toml, utah.toml overlay, device firmware, [unavailable] rules, repository policy. Use when adding, removing, or debugging packages or parity/check-repos failures.",
+      "description": "Bluefin parity contract: verbatim bluefin.toml, utah.toml overlay, device firmware, [unavailable] rules, repository policy (on-image reposdir scan). Use when adding, removing, or debugging packages or parity/check-repos failures.",
       "version": "1.1",
       "last_updated": "2026-10-03",
       "doc_type": "policy"
@@ -143,7 +163,7 @@
       ],
       "description": "First-boot setup hooks stamp completion through libsetup.sh. Use when editing a hook, migrating one off the legacy `version-script` gate, or debugging a hook that never runs or runs every boot.",
       "version": "1.0",
-      "last_updated": "2026-09-30",
+      "last_updated": "2026-10-03",
       "doc_type": "procedure"
     },
     {

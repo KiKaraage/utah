@@ -73,6 +73,7 @@ check:
     test -f scripts/install-v4l2loopback.sh
     test -f scripts/image-repo.sh
     test -f packages/RPM-GPG-KEY-fedora-44-primary
+    test -f scripts/bootc_lifecycle.py
     test -f contracts/bluefin-desktop.toml
     # The reusable image workflow checks out this repository without
     # submodules. Populate them here before validating the source contract;
@@ -98,6 +99,7 @@ check:
     grep -q 'live_customize' iso/scripts/build-iso-tacklebox.sh
     grep -q 'offline_payloads' iso/scripts/build-iso-tacklebox.sh
     grep -q 'Secure Boot DISABLED' iso/scripts/build-iso-tacklebox.sh
+    test -f iso/scripts/lifecycle-e2e.sh
     python3 -m json.tool iso/live/src/etc/bootc-installer/images.json >/dev/null
     python3 -m json.tool iso/live/src/etc/bootc-installer/recipe.json >/dev/null
     grep -q 'org.bootcinstaller.Installer' iso/live/src/install-flatpaks.sh
@@ -175,7 +177,8 @@ check-desktop-contract image_ref="localhost/utah:testing":
       -v "$PWD/scripts/verify-desktop-contract.py:/tmp/verify-desktop-contract.py:ro" \
       "{{ image_ref }}" /tmp/verify-desktop-contract.py /tmp/bluefin-desktop.toml
     podman run --rm --entrypoint /usr/bin/python3 \
-      "{{ image_ref }}" /usr/local/libexec/utah-verify-gnome-extensions
+      -v "$PWD/scripts/verify-gnome-extensions.py:/tmp/verify-gnome-extensions.py:ro" \
+      "{{ image_ref }}" /tmp/verify-gnome-extensions.py
 
 # Fail fast when a contract package is in none of the repositories the image
 # actually enables, instead of discovering it twenty minutes into a build.
@@ -365,13 +368,13 @@ build-ghcr base_name stream flavor kernel_pin="":
       cosign_bin="$(command -v cosign || true)"
       if [ "${GITHUB_ACTIONS:-false}" = true ]; then
         case "$(uname -m)" in
-          x86_64) cosign_arch=amd64; cosign_sha=783b5d6c74105401c63946c68d9b2a4e1aab3c8abce043e06b8510b02b623ec9 ;;
-          aarch64) cosign_arch=arm64; cosign_sha=bffabe4cf183122b7de3111257a863c99e7dc6cf1093bfd7bf961de1795589b8 ;;
+          x86_64) cosign_arch=amd64; cosign_sha=064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a ;;
+          aarch64) cosign_arch=arm64; cosign_sha=56a16480bdd56ec789abaa65924402f6b92c0041f06885995853c05567b76f34 ;;
           *) echo "Unsupported cosign architecture" >&2; exit 1 ;;
         esac
         cosign_bin="${RUNNER_TEMP:?}/utah-tools/cosign"
         mkdir -p "${cosign_bin%/*}"
-        curl -fsSL "https://github.com/sigstore/cosign/releases/download/v2.5.3/cosign-linux-${cosign_arch}" -o "$cosign_bin"
+        curl -fsSL "https://github.com/sigstore/cosign/releases/download/v2.6.1/cosign-linux-${cosign_arch}" -o "$cosign_bin"
         echo "${cosign_sha}  ${cosign_bin}" | sha256sum --check --strict
         chmod 0755 "$cosign_bin"
       fi
@@ -415,9 +418,36 @@ build-ghcr base_name stream flavor kernel_pin="":
     else
       echo "Registry layer cache: off (${layer_cache_ref} is not readable from here)"
     fi
+    # Key the package transaction on Hummingbird's repository revision so the
+    # layer cache above cannot pin a rolling repository to an old snapshot
+    # (HUMMINGBIRD_REPO_DAY in the Containerfile). An unreachable repo
+    # would fail the transaction anyway; warn here and let it.
+    # Bash builtins only: the recipe also runs in a sandboxed PATH
+    # (tests/test_kernel_cache_signing.py), where sed and curl may be absent.
+    hb_baseurl=""
+    while IFS= read -r line; do
+      case "$line" in baseurl=*) hb_baseurl="${line#baseurl=}"; break ;; esac
+    done < packages/hummingbird.repo
+    hb_revision=""
+    if command -v curl >/dev/null 2>&1 \
+        && repomd="$(curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 "${hb_baseurl%/}/repodata/repomd.xml")" \
+        && [[ "$repomd" =~ \<revision\>([^<]+)\</revision\> ]]; then
+      hb_revision="${BASH_REMATCH[1]}"
+    fi
+    if [ -z "$hb_revision" ]; then
+      echo "::warning title=Hummingbird revision unresolved::${hb_baseurl} gave no repomd revision; the package layer may come from cache"
+      hb_revision=unresolved
+    elif [[ "$hb_revision" =~ ^[0-9]{9,}$ ]]; then
+      # The revision is a publish timestamp and moves several times a day.
+      # Keyed on its UTC day, the transaction refreshes once a day and the
+      # builds in between still share the cached layer.
+      hb_revision="$(date -u -d "@${hb_revision}" +%Y-%m-%d)"
+    fi
+    echo "Hummingbird repository day: ${hb_revision}"
     podman build \
       "${base_args[@]}" \
       "${layer_cache_args[@]}" \
+      --build-arg HUMMINGBIRD_REPO_DAY="$hb_revision" \
       --build-arg IMAGE_NAME="$image_name" \
       --build-arg IMAGE_ID="{{ image }}" \
       --build-arg IMAGE_FLAVOR={{ flavor }} \
@@ -462,6 +492,18 @@ luks-test iso_path="output/utah-live.iso" image="ghcr.io/projectbluefin/utah:tes
 # verified result can be driven by hand instead of only asserted about.
 try-installed:
     bash iso/scripts/boot-installed.sh
+
+# Validate bootc upgrade and rollback lifecycle between two immutable digests in QEMU.
+# Boots a known Utah deployment, stages/upgrades to candidate digest via bootc/uupd,
+# verifies graphical desktop, rolls back, and verifies the previous deployment.
+# Defaults to the debug live ISO -- `just iso testing 1` -- because the harness
+# logs in over SSH as the `utahtest` account the installer provisions. The disk
+# from `just generate-bootable-image` has no such account and cannot be used.
+# The ISO installs its payload as baseline_image, then the harness stages
+# candidate_image; the candidate has no default because staging the baseline
+# ref again is a no-op and would never exercise an upgrade.
+lifecycle-test candidate_image disk_or_iso="output/utah-live.iso" baseline_image="ghcr.io/projectbluefin/utah:testing":
+    bash iso/scripts/lifecycle-e2e.sh "{{ disk_or_iso }}" "{{ baseline_image }}" "{{ candidate_image }}"
 
 generate-build-tags base_name stream flavor kernel_pin build_number version event_name event_number:
     @echo "{{ stream }} {{ version }}"

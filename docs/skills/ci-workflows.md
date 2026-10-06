@@ -14,8 +14,8 @@ tags: [ci, workflows, actions, promotion]
 description: >-
   build.yml contract gate, kernel-cache job, main/kernel matrix split,
   promote-testing-to-main and sync-main-to-testing, actions@v1 delegation,
-  weekly factory-pin bump. Use when changing .github/workflows/ or debugging a
-  red run.
+  Renovate-managed factory pin. Use when changing .github/workflows/ or
+  debugging a red run.
 metadata:
   type: reference
 ---
@@ -60,6 +60,12 @@ opaque `exit status 71` from the image build (comment,
   pinned at `packages/.bluefin-parity-ref`.
 - `just check-repos` -- the complete installation transaction against the
   digest-pinned base and package repository, including extension build tools.
+
+Host-side unit tests in this gate must be wall-clock independent: a loaded
+runner can take over a second between setup and assertion, so any test that
+renders relative times freezes the clock in the harness (the `ago()` site
+test pins `Date.now`) rather than trusting setup-to-assert to stay within
+one unit.
 
 ### CI guard scripts and test coverage
 
@@ -150,8 +156,8 @@ verify. Everyone who can dispatch this workflow can already sign from an
 arbitrary branch via a same-repo pull request, so accepting branch heads
 widens nothing (#316).
 
-The consumer (`build-ghcr`) also fails closed: CI downloads cosign v2.5.3
-with the platform SHA-256 pinned by `sigstore/cosign-installer@d58896d6…`,
+The consumer (`build-ghcr`) also fails closed: CI downloads cosign v2.6.1
+with the platform SHA-256 pinned by `sigstore/cosign-installer@7e8b541e…`,
 outside the context under `${RUNNER_TEMP}/utah-tools`, and invokes its absolute
 path because the reusable builder uses `sudo` with `secure_path`. Local kernel
 builds require cosign on PATH. The tag is resolved once through `skopeo`, the
@@ -323,46 +329,23 @@ The cadence is RFC'd in #336. What runs today:
   a maintainer policy call, not a code gap, and nothing in this tree should
   encode a guess at it.
 
-`bump-factory-pin` is the part of #336 that is code. `ARG PACKAGE_IMAGE_SHA`
-is the digest of `ghcr.io/projectbluefin/utah-packages`, the RPM repository
-every image installs from, and until this tool existed nothing revved it: the
-factory published GNOME 51 finals and the pin kept serving the previous digest
-until a human noticed. `scripts/bump-factory-pin.py` resolves the tag through
-the registry's own manifest endpoint, reading `Docker-Content-Digest` off the
-response -- anonymous bearer token, no skopeo install, no credential in the
-log -- and rewrites one line of the Containerfile.
+`ARG PACKAGE_IMAGE_SHA` is the digest of `ghcr.io/projectbluefin/utah-packages`,
+the RPM repository every image installs from. The built-in Dockerfile manager
+does not discover this ARG indirection, so Utah's local regex manager reads
+both that pin and `packages/utah-packages.repo`'s `# factory-pin:` stamp as
+occurrences of one Docker dependency tracking `latest`.
 
-The rewrite is deliberately timid, and `tests/test_bump_factory_pin.py` pins
-why: it refuses a pin it could not parse, refuses a `PACKAGE_IMAGE_REF` that
-does not compose from `PACKAGE_IMAGE`/`PACKAGE_IMAGE_SHA` (a bump that would
-never reach the build), and replaces exactly one line. Its three modes are
-`--print` (resolve and report, write nothing), `--check` (exit non-zero when
-the pin is stale, write nothing), and the default (rewrite), plus `--digest` to
-take a digest resolved by another job. The suite is offline by default; the one
-test that talks to the registry runs only with `UTAH_NETWORK_TESTS=1`.
+Digest updates are grouped into one Renovate PR. Both occurrences must change
+to the same digest: the stamp invalidates the package transaction's layer
+cache, while the ARG selects the repository and labels its provenance. The
+existing equality and full transaction checks remain the adoption gates.
 
-The schedule is `.github/workflows/bump-factory-pin.yml`: Mondays 07:00 UTC and
-on demand, a read-only resolve job followed by a one-line pull request against
-`testing` opened with `peter-evans/create-pull-request` -- the same mechanism
-the ISO documentation PR already uses, under the same never-merge rule. Both
-jobs check out `testing` once and run the script from that checkout, so a
-`workflow_dispatch` fired before `scripts/bump-factory-pin.py` has reached
-`testing` fails on the missing file: wait for the sync, or dispatch from a ref
-that already carries the script.
+The extraction and real replacement were exercised with Renovate 44.132.2;
+the inherited local preset is `config:recommended`. This replaces the separate
+scheduled factory updater rather than running two bots over the same pins.
+No `image-versions.yml` alias or second literal pin is introduced. Renovate's
+PR event runs normal CI; every update still requires independent review.
 
-That pull request arrives with no checks on it. `create-pull-request` authors
-it as `github-actions[bot]` using the default `GITHUB_TOKEN`, and GitHub does
-not fire `on: pull_request` workflows for that token; this repository holds no
-App or PAT credential to author it with instead. The build matrix is therefore
-a manual step -- push an empty commit to `automation/factory-pin`, or close and
-reopen the pull request, and `build.yml` runs. An empty check list on one of
-these is not a passing build.
-
-Renovate is not the mechanism here because the pin is an `ARG` indirection, not
-a `FROM image@sha256:` -- the built-in dockerfile manager cannot see it, and
-the org custom manager only covers `image-versions.yml`. A future
-`image-versions.yml` in this repository would make that a duplicate; do not
-add one without retiring this workflow.
 
 ## Verification
 

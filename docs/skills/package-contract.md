@@ -13,7 +13,8 @@ dependencies: []
 tags: [packages, parity, bluefin, contracts]
 description: >-
   Bluefin parity contract: verbatim bluefin.toml, utah.toml overlay, device
-  firmware, [unavailable] rules, repository policy. Use when adding, removing,
+  firmware, [unavailable] rules, repository policy (on-image reposdir
+  scan). Use when adding, removing,
   or debugging packages or parity/check-repos failures.
 metadata:
   type: policy
@@ -107,6 +108,30 @@ comment, `Containerfile` ~L168; repo files copied at `Containerfile` L59).
 `Containerfile.kernel`'s builder stage may use the pinned Fedora 44 repository
 (`packages/fedora-44.repo`) strictly as a builder-only toolchain.
 
+Every allowlisted repository is attested on two axes. Its **origin** is pinned
+in `[repositories.baseurls]`: `verify-rpm-contract.py` fails a build that
+enables an allowlisted repository with a different `baseurl`, a `metalink`/
+`mirrorlist` (which DNF merges with any `baseurl` the section declares), or no
+`baseurl` at all. Its **fetch integrity** is attested too: the same check
+rejects `proxy=`, `sslverify=0`, `gpgcheck=0` (or its libdnf5 alias
+`pkg_gpgcheck=0`), and `repo_gpgcheck=0` on an allowlisted repository (#345).
+`proxy` and `sslverify=0` reroute or blind the fetch and are never approved;
+`gpgcheck`/`repo_gpgcheck` disable RPM signature verification and are rejected
+unless the repository is named in `[repositories.security]` with the option it
+is approved to leave disabled (`gpgcheck` covers both `gpgcheck` and
+`pkg_gpgcheck`). A repository not named there may not explicitly disable
+signature verification (an omitted option falls back to the dnf5 default and
+is not rejected). The same options set to a disabled value in the resolved dnf5
+`[main]` configuration are always rejected, since they apply to every
+repository and no per-repository approval covers them. A
+`[repositories.security]` entry for a repository not in `[repositories.allowed]`
+is rejected as approving nothing, as is any listed option other than
+`gpgcheck` or `repo_gpgcheck`. The two documented exceptions are
+`utah-packages` (RPMs are authenticated by the pinned package image and its OCI
+provenance, not an RPM GPG key, so both signature checks are disabled) and
+`nvidia-container-toolkit` (NVIDIA signs only its repomd.xml, so only package
+signature verification is disabled).
+
 The install-source identity is single-sourced in `packages/*.repo`. Each repository
 participating in the package install transaction carries a `# utah-install: true`
 annotation (either directly preceding or within the `[section]` header in
@@ -118,12 +143,40 @@ precede base Hummingbird packages (`priority=10`). Repositories without this mar
 the desktop package transaction.
 
 The pinned package image is an RPM repository, not a runtime dependency. It is
-bind-mounted into the RUN steps that install from it (`Containerfile`
-L177 and L255) and never copied into a layer: a COPY of the whole ~4 GB
-repository would leave a permanent layer behind, so reproducibility now comes
-from the digest-pinned `packages` stage being the only source the package
-transaction can see rather than from the repository contents living in the
-image.
+bind-mounted into the package-contract and flavor-specific install RUN steps in
+[`Containerfile`](../../Containerfile), both identified by
+`--mount=type=bind,from=packages,source=/repository,target=/etc/utah-packages,ro`,
+and never copied into a layer: a COPY of the whole ~4 GB repository would leave
+a permanent layer behind, so reproducibility now comes from the digest-pinned
+`packages` stage being the only source the package transaction can see rather
+than from the repository contents living in the image.
+
+The allowlist also runs **on-image**, against the composed image's runtime RPM
+repositories, not just the source files in `packages/`. `verify-rpm-contract.py`
+scans every `reposdir` dnf5 resolves at runtime, not a hardcoded list of
+defaults (#454, #513, #536). Repository override directories
+(`/etc/dnf/repos.override.d`) are not covered here; they are tracked
+separately (#527).
+
+- The `reposdir=` option in `/usr/share/dnf5/libdnf.conf.d/*.conf`,
+  `/etc/dnf/libdnf5.conf.d/*.conf`, or `/etc/dnf/dnf.conf` replaces the
+  documented default list. The gate loads these `[main]` configs in dnf5's
+  order — drop-ins merged by file name (an `/etc` file masks a same-named
+  `/usr/share` file) and applied sorted by file name, then `dnf.conf` — and
+  uses the last-set value if any, so a custom reposdir the base image
+  configures is scanned instead of the three defaults (#536).
+- Without `reposdir=` configured, the gate falls back to dnf5's documented
+  defaults — `/etc/yum.repos.d`, `/etc/distro.repos.d`,
+  `/usr/share/dnf5/repos.d` — so a `.repo` file the base ships anywhere in
+  those paths is subject to the same allowlist (#454, #513). A repo file the
+  base ships in `/etc/distro.repos.d` or `/usr/share/dnf5/repos.d` is enabled
+  at runtime exactly as one in `/etc/yum.repos.d`, so scanning only the
+  first would leave it invisible to the gate (#513).
+- A `proxy=` or `sslverify=0` in the resolved `[main]` section of the same dnf5
+  configs applies to every allowlisted repository, so the gate resolves
+  `[main]` the same way (later file wins, an empty `proxy=` clears an earlier
+  one) and fails if the effective value sets a proxy or disables TLS
+  verification (#352).
 
 ## Printing and scanning gaps
 
@@ -225,8 +278,8 @@ default branch, preventing unrelated upstream changes from breaking Utah's CI.
 Update it whenever synchronizing `packages/bluefin.toml` with upstream.
 
 Current counts, per the README "Package parity" section: 61 Bluefin contract
-packages installed, 89 Utah additions (GNOME 51, base-image parity, device
-firmware, desktop services), 7 genuinely unavailable. `scripts/check-doc-counts.py` (part of
+packages installed, 105 Utah additions (GNOME 51, base-image parity, device
+firmware, desktop services), 8 genuinely unavailable. `scripts/check-doc-counts.py` (part of
 `just check`) recomputes these from the manifests and fails if either
 document drifts from `site/data/packages.json`.
 
@@ -392,7 +445,13 @@ rename) and listed in `just check`'s presence assertion. Its option
 loop mirrors Common's exactly — `--` and the first non-option both end
 option parsing — and the remaining positionals are forwarded verbatim,
 so an empty `IMAGE_NAME` keeps its slot instead of promoting
-`IMAGE_TAG` into it.
+`IMAGE_TAG` into it. `IMAGE_NAME` itself falls back to the `IMAGE_NAME`
+environment variable the same way Common's resolver does
+(`${1-${IMAGE_NAME-}}`), so callers that supply the name via the
+environment (without a positional) still hit the `utah*` short-circuit
+(#465); absent positionals are still omitted rather than synthesised
+as empty, so the upstream env fallback also applies on the fall-through
+path.
 
 Two deliberate differences from Common's `report` recipe: the override sets
 `BONEDIGGER_BRAND="🐦 Utah Bug Report"` so the prompt names Utah rather than
